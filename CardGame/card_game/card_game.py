@@ -1,6 +1,5 @@
 import copy
 from random import shuffle
-
 from .card import Card
 from .player import Player
 import collections
