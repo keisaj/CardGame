@@ -40,6 +40,26 @@ class RandomPlayer(Player):
     def set_final_reward(self, points: dict):
         pass
 
+class GambitPlayer(Player):
+
+    name = 'Gambit Player'
+    def __init__(self) -> None:
+        global player
+        self.number = player
+        player += 1
+
+    def make_move(self, game_state: dict) -> Card:
+        return super().make_move(game_state)
+
+    def get_name(self) -> str:
+        return self.name + f'{self.number}'
+    
+    def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):
+        return super().set_temp_reward(discarded_cards, point_deltas)
+    
+    def set_final_reward(self, points: dict):
+        return super().set_final_reward(points)
+
 
 def main():
     game = CardGame(RandomPlayer(), RandomPlayer(), RandomPlayer(), RandomPlayer(), delay=100, display=False)
