@@ -71,22 +71,43 @@ class GambitPlayer(Player):
 
     def create_model(self):
         learning_rate = 0.001
-        action_size = 6 # 6 kart dostajemy na start [1, 2, 3, 4, 5, 0,| 5, 6, 7, 8 ]
+        action_size = 24
+        state_size = 10 # [1, 2, 3, 4, 5, 0,| 5, 6, 7, 8 ]
 
         model = keras.Sequential()
         model.add(keras.layers.Dense(64, input_dim=state_size, activation='relu'))
         model.add(keras.layers.Dense(64, activation="relu"))
-        model.add(keras.layers.Dense(action_size))
+        model.add(keras.layers.Dense(action_size, activation="softmax"))
         model.compile(loss="mse",
               optimizer=keras.optimizers.Adam(learning_rate=learning_rate))
+        # na wyjsciu sieci chcemy miec pojedyncza liczbe z zakresu 1-24 wskazujaca karte z naszej mapy
+        # te liczbe otrzymana od sieci podajemy do funkcji decode_number_to_card_from_hand() zeby dostac karte do zagrania
+
+    def decode_number_to_card_from_hand(self, prediction, hand):
+        rank = None
+        suit = None
+        for r in self.card_map.keys():
+            for s in self.card_map[r]:
+                if self.card_map[r][s] is prediction:
+                    rank = r
+                    suit = s
+                    break
+        for card in hand:
+            if card.rank is rank and card.suit is suit:
+                return card # siec chce zagrac te karte
+        return random.choice(hand)  # tu by sie przydalo ukarac siec bo chciala zagrac karte ktorej nie mamy w rece
 
     # returns vector of 6 elements with mapped card -> number
     # if there is less than 6 cards on hand it will be filled to 6 with zeros
-    def get_input_vector(self, hand):
+    def get_input_vector(self, game_state):
         vect = []
-        for card in hand:
+        for card in game_state['hand']:
             vect.append(self.decode(card))
         for i in range(6 - len(vect)):
+            vect.append(0)
+        for discard in game_state['discard']:
+            vect.append(self.decode(discard))
+        for i in range(10 - len(vect)):
             vect.append(0)
         return np.array(vect)
 
