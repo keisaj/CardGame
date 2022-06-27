@@ -13,6 +13,7 @@ class GambitPlayer(Player):
         player += 1
         self.epsilon = 1.0 
         self.model = self.create_model()
+        self.card_map = self.get_card_map()
         
     def make_move(self, game_state: dict) -> Card:
         """
@@ -79,6 +80,30 @@ class GambitPlayer(Player):
         model.compile(loss="mse",
               optimizer=keras.optimizers.Adam(learning_rate=learning_rate))
 
+    # returns vector of 6 elements with mapped card -> number
+    # if there is less than 6 cards on hand it will be filled to 6 with zeros
+    def get_input_vector(self, hand):
+        vect = []
+        for card in hand:
+            vect.append(self.decode(card))
+        for i in range(6 - len(vect)):
+            vect.append(0)
+        return np.array(vect)
+
+    def get_card_map(self):
+        ranks = ['9', '10', 'Jack', 'Queen', 'King', 'Ace']
+        suits = ['Clovers', 'Diamonds', 'Hearts', 'Spades']
+        counter = 1
+        map = {}
+        for i in range(5):
+            map[ranks[i]] = {}
+            for j in range(4):
+                map[ranks[i]][suits[j]] = counter
+                counter = counter + 1
+        return map
+
+    def decode(self, card):
+        return self.card_map.get(card.rank).get(card.suit)
 
 
 
