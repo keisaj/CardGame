@@ -3,6 +3,7 @@ from random import shuffle
 from .card import Card
 from .player import Player
 import collections
+from typing import Tuple
 
 from .pygame_renderer import PygameRenderer
 
@@ -83,7 +84,7 @@ class CardGame:
 
         return True
 
-    def _calc_penalty(self) -> tuple[Player, int]:
+    def _calc_penalty(self) -> Tuple[Player, int]:
         """
         The penalty for losing a round is:
         1 point for each card from the hearts suit
