@@ -95,7 +95,7 @@ class GambitPlayer(Player):
         suits = ['Clovers', 'Diamonds', 'Hearts', 'Spades']
         counter = 1
         map = {}
-        for i in range(5):
+        for i in range(6):
             map[ranks[i]] = {}
             for j in range(4):
                 map[ranks[i]][suits[j]] = counter
