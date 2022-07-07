@@ -25,7 +25,7 @@ class Memory:
 
     def __len__(self):
         return len(self.actions)
-
+# Q[state, action] = Q[state, action] + lr * (reward + gamma * np.max(Q[new_state, :]) — Q[state, action])
 
 def discount_rewards(rewards, gamma=0.95):
     discounted_rewards = np.zeros_like(rewards)
@@ -90,8 +90,41 @@ class GambitPlayer(Player):
 
     def make_move(self, game_state: dict) -> Card:
         pred = self.get_action(game_state)
-        played_card = self.decode_number_to_card_from_hand(pred, game_state)
-        return played_card
+        card = self.decode_number_to_card_from_hand(pred, game_state)
+        if self.is_legal_move(card, game_state):
+            print('Yay! Legal Move')
+            return card
+
+        self.punish()
+        return self.get_any_legal_move(game_state)
+
+    def is_legal_move(self, card, game_state):
+        if card is None:
+            return False
+
+        if not game_state["discard"]:
+            return True
+        else:
+            options = list(
+                filter(lambda c: c.suit == list(game_state["discard"])[0].suit, game_state["hand"]))
+            if len(options) > 0:
+                return card in options
+            else:
+                return True
+
+    def punish(self):
+        print('Illegal Move')
+
+    def get_any_legal_move(self, game_state):
+        if not game_state["discard"]:
+            return random.choice(game_state["hand"])
+        else:
+            options = list(
+                filter(lambda c: c.suit == list(game_state["discard"])[0].suit, game_state["hand"]))
+            if len(options) > 0:
+                return random.choice(options)
+            else:
+                return random.choice(game_state['hand'])
 
     def get_action(self, game_state):
         self.observation = self.get_input_vector(game_state)
@@ -102,7 +135,7 @@ class GambitPlayer(Player):
         return action[0]
 
     def create_model(self):
-        learning_rate = 0.001
+        learning_rate = 0.01
         action_size = 24
         state_size = 9  # [1, 2, 3, 4, 5, 0,| 5, 6, 7 ]
 
@@ -125,26 +158,8 @@ class GambitPlayer(Player):
                     break
         for card in game_state['hand']:
             if card.rank is rank and card.suit is suit:
-                if not game_state["discard"]:
-                    return random.choice(game_state["hand"])
-                else:
-                    options = list(
-                        filter(lambda c: c.suit == list(game_state["discard"])[0].suit, game_state["hand"]))
-                    if len(options) > 0:
-                        return random.choice(options)
-                    else:
-                        return card
-
-        # tu by sie przydalo ukarac siec bo chciala zagrac karte ktorej nie mamy w rece
-        if not game_state["discard"]:
-            return random.choice(game_state["hand"])
-        else:
-            options = list(
-                filter(lambda c: c.suit == list(game_state["discard"])[0].suit, game_state["hand"]))
-            if len(options) > 0:
-                return random.choice(options)
-            else:
-                return random.choice(game_state['hand'])
+                return card
+        return None
 
     def get_input_vector(self, game_state):
         vect = []
