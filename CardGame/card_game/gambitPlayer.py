@@ -125,6 +125,3 @@ class GambitPlayer(Player):
 
     def decode(self, card):
         return self.card_map.get(card.rank).get(card.suit)
-
-
-

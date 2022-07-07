@@ -8,6 +8,7 @@
 import random
 
 from card_game import CardGame, Player, Card
+from felipe import Agent
 
 player = 1
 
@@ -62,9 +63,8 @@ class DebugPlayer(RandomPlayer):
         return super().set_final_reward(points)
 
 def main():
-    game = CardGame(RandomPlayer(), RandomPlayer(), DebugPlayer(), RandomPlayer(), delay=100, display=True, full_deck=False)
+    game = CardGame(RandomPlayer(), RandomPlayer(), Agent(), RandomPlayer(), delay=100, display=True, full_deck=False)
     print(game.start())
-    # print(game.start())
 
 
 if __name__ == '__main__':
