@@ -4,8 +4,10 @@ import tensorflow as tf
 from tensorflow import keras
 
 from card_game import CardGame, Player, Card
+from keras.optimizers import Adam
 
 player = 1
+
 
 class Memory:
     def __init__(self):
@@ -24,6 +26,35 @@ class Memory:
     def __len__(self):
         return len(self.actions)
 
+
+def discount_rewards(rewards, gamma=0.95):
+    discounted_rewards = np.zeros_like(rewards)
+    R = 0
+    for t in reversed(range(0, len(rewards))):
+        R = R * gamma + rewards[t]
+        discounted_rewards[t] = R
+    return discounted_rewards
+
+
+def compute_loss(logits, actions, rewards):
+    neg_logprob = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        logits=logits, labels=actions)
+    loss = tf.reduce_mean(neg_logprob * rewards)
+    return loss
+
+
+def train_step(model, loss_function, optimizer, observations, actions, discounted_rewards, custom_fwd_fn=None):
+    with tf.GradientTape() as tape:
+        if custom_fwd_fn is not None:
+            prediction = custom_fwd_fn(observations)
+        else:
+            prediction = model(observations)
+        loss = loss_function(prediction, actions, discounted_rewards)
+    grads = tape.gradient(loss, model.trainable_variables)
+    grads, _ = tf.clip_by_global_norm(grads, 2)
+    optimizer.apply_gradients(zip(grads, model.trainable_variables))
+
+
 class GambitPlayer(Player):
     name = 'Gambit Player'
 
@@ -35,22 +66,32 @@ class GambitPlayer(Player):
         self.model = self.create_model()
         self.card_map = self.get_card_map()
         self.memory = Memory()
-
-    def make_move(self, game_state: dict) -> Card:
-        pred = self.get_action(game_state)
-        played_card = self.decode_number_to_card_from_hand(pred, game_state)
-        return played_card
+        self.optimizer = Adam()
+        self.reward = 0
+        self.action = 0
+        self.observation = 0
 
     def get_name(self) -> str:
         return self.name + f'{self.number}'
 
     def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):
-        # dodaje do memory
-        return super().set_temp_reward(discarded_cards, point_deltas)
+        for point in point_deltas:
+            if type(point) == type(GambitPlayer()):
+                self.reward = -point_deltas[point]
+                self.memory.add_to_memory(self.observation, self.action, self.reward)
 
     def set_final_reward(self, points: dict):
-        # nagradzam
-        return super().set_final_reward(points)
+        total_reward = sum(self.memory.rewards)
+        train_step(self.model, compute_loss, self.optimizer,
+                   observations=np.vstack(self.memory.observations),
+                   actions=np.array(self.memory.actions),
+                   discounted_rewards=discount_rewards(self.memory.rewards))
+        self.memory.clear()
+
+    def make_move(self, game_state: dict) -> Card:
+        pred = self.get_action(game_state)
+        played_card = self.decode_number_to_card_from_hand(pred, game_state)
+        return played_card
 
     def get_action(self, game_state):
         self.observation = self.get_input_vector(game_state)
@@ -72,8 +113,6 @@ class GambitPlayer(Player):
         model.compile(loss="mse",
                       optimizer=keras.optimizers.Adam(learning_rate=learning_rate))
         return model
-        # na wyjsciu sieci chcemy miec pojedyncza liczbe z zakresu 1-24 wskazujaca karte z naszej mapy
-        # te liczbe otrzymana od sieci podajemy do funkcji decode_number_to_card_from_hand() zeby dostac karte do zagrania
 
     def decode_number_to_card_from_hand(self, prediction, game_state):
         rank = None
@@ -107,8 +146,6 @@ class GambitPlayer(Player):
             else:
                 return random.choice(game_state['hand'])
 
-    # returns vector of 6 elements with mapped card -> number
-    # if there is less than 6 cards on hand it will be filled to 6 with zeros
     def get_input_vector(self, game_state):
         vect = []
         for card in game_state['hand']:
@@ -141,6 +178,7 @@ class RandomPlayer(Player):
     """
     Makes random moves (but according to the rules)
     """
+
     def __init__(self):
         global player
         self.number = player
@@ -167,7 +205,44 @@ class RandomPlayer(Player):
 
 
 def main():
-    game = CardGame(RandomPlayer(), RandomPlayer(), GambitPlayer(), RandomPlayer(), delay=100, display=False, full_deck=False)
+    players = [RandomPlayer(), RandomPlayer(), GambitPlayer(), RandomPlayer()]
+    players_list = [players[0], players[1], players[2], players[3]]
+    players_wl_ratio = {
+        players[0]: 0,
+        players[1]: 0,
+        players[2]: 0,
+        players[3]: 0
+    }
+    for i, ep in enumerate(range(100)):
+        random.shuffle(players)
+        game = CardGame(players[0], players[1], players[2], players[3], delay=0, display=False,
+                        full_deck=False)
+        results = game.start()
+
+        loser = None
+        for result in results:
+            if loser is None:
+                loser = result
+            else:
+                if results[loser] < results[result]:
+                    loser = result
+        players_wl_ratio[loser] = players_wl_ratio[loser] + 1
+        resultStr = players_list[0].get_name() + " : " + str(players_wl_ratio[players_list[0]]), \
+                    players_list[1].get_name() + " : " + str(players_wl_ratio[players_list[1]]), \
+                    players_list[2].get_name() + " : " + str(players_wl_ratio[players_list[2]]), \
+                    players_list[3].get_name() + " : " + str(players_wl_ratio[players_list[3]])
+
+        print('Episode:', i, 'results:', resultStr)
+
+    for p in players:
+        if type(p) == type(GambitPlayer()):
+            p.model.save_weights('wagi')
+            break
+
+    # Play final game
+    random.shuffle(players)
+    game = CardGame(players[0], players[1], players[2], players[3], delay=100, display=True,
+                    full_deck=False)
     print(game.start())
 
 
