@@ -37,7 +37,6 @@ class RandomPlayer(Player):
     def set_final_reward(self, points: dict):
         pass
 
-
 # --------------------------------------------------------------------------------------------------------------------
 def choose_action(model, observation, single=True):
     observation = np.expand_dims(observation, axis=0) if single else observation
@@ -127,8 +126,6 @@ class Agent(Player):
         self.observation = 0
         self.reward = 0
         self.prev_discards = []
-
-    def make_model(self):
 
 
     def make_move(self, game_state: dict) -> Card:

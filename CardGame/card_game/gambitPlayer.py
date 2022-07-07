@@ -4,6 +4,28 @@ import random
 import numpy as np
 from tensorflow import keras
 
+def normalize(x):
+    x -= np.mean(x)
+    x /= np.std(x)
+    return x.astype(np.float32)
+
+class Memory:
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.observations = []
+        self.actions = []
+        self.rewards = []
+
+    def add_to_memory(self, new_observation, new_action, new_reward):
+        self.observations.append(new_observation)
+        self.actions.append(new_action)
+        self.rewards.append(new_reward)
+
+    def __len__(self):
+        return len(self.actions)
+
 class GambitPlayer(Player):
 
     name = 'Gambit Player'
@@ -14,6 +36,7 @@ class GambitPlayer(Player):
         self.epsilon = 1.0 
         self.model = self.create_model()
         self.card_map = self.get_card_map()
+        self.test = "l"
         
     def make_move(self, game_state: dict) -> Card:
         """
