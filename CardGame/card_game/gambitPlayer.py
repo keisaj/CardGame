@@ -3,11 +3,10 @@ from card_game import CardGame, Player, Card
 import random
 import numpy as np
 from tensorflow import keras
+import tensorflow as tf
 
-def normalize(x):
-    x -= np.mean(x)
-    x /= np.std(x)
-    return x.astype(np.float32)
+player = 1
+
 
 class Memory:
     def __init__(self):
@@ -25,103 +24,149 @@ class Memory:
 
     def __len__(self):
         return len(self.actions)
+# Q[state, action] = Q[state, action] + lr * (reward + gamma * np.max(Q[new_state, :]) — Q[state, action])
+
+
+def discount_rewards(rewards, gamma=0.95):
+    discounted_rewards = np.zeros_like(rewards)
+    R = 0
+    for t in reversed(range(0, len(rewards))):
+        R = R * gamma + rewards[t]
+        discounted_rewards[t] = R
+    return discounted_rewards
+
+
+def compute_loss(logits, actions, rewards):
+    neg_logprob = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        logits=logits, labels=actions)
+    loss = tf.reduce_mean(neg_logprob * rewards)
+    return loss
+
+
+def train_step(model, loss_function, optimizer, observations, actions, discounted_rewards, custom_fwd_fn=None):
+    with tf.GradientTape() as tape:
+        if custom_fwd_fn is not None:
+            prediction = custom_fwd_fn(observations)
+        else:
+            prediction = model(observations)
+        loss = loss_function(prediction, actions, discounted_rewards)
+    grads = tape.gradient(loss, model.trainable_variables)
+    grads, _ = tf.clip_by_global_norm(grads, 2)
+    optimizer.apply_gradients(zip(grads, model.trainable_variables))
+
 
 class GambitPlayer(Player):
-
     name = 'Gambit Player'
+
     def __init__(self) -> None:
         global player
         self.number = player
         player += 1
-        self.epsilon = 1.0 
+        self.epsilon = 1.0
+        self.optimizer = Adam()
         self.model = self.create_model()
         self.card_map = self.get_card_map()
-        self.test = "l"
-        
-    def make_move(self, game_state: dict) -> Card:
-        """
-        The player will receive a dict with:
-        - 'hand': list of held cards
-        - 'discard': list of discarded cards in this round
-        """
-        """
-        move = model.predict(game_state)
-        """
-
-        played_card = super().make_move(game_state)
-        return played_card
+        self.memory = Memory()
+        self.reward = 0
+        self.action = 0
+        self.observation = 0
 
     def get_name(self) -> str:
         return self.name + f'{self.number}'
-    
+
     def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):
-        """
-        After four cards get played, every player will receive a dict with:
-        - 'discarded_cards': dict of these discarded cards by each player (ordered!)
-        - 'point_deltas': dict of points received in this round by each player
-        """
-        return super().set_temp_reward(discarded_cards, point_deltas)
-    
+        for point in point_deltas:
+            if type(point) == type(GambitPlayer()):
+                self.reward += -point_deltas[point]
+                self.memory.add_to_memory(
+                    self.observation, self.action, self.reward)
+
     def set_final_reward(self, points: dict):
-        """
-        After all cards have been played, every player will receive a dict with
-        points received in this round by each player. A game consists of eleven such full rounds.
-        """
-        return super().set_final_reward(points)
+        total_reward = sum(self.memory.rewards)
+        train_step(self.model, compute_loss, self.optimizer,
+                   observations=np.vstack(self.memory.observations),
+                   actions=np.array(self.memory.actions),
+                   discounted_rewards=discount_rewards(self.memory.rewards))
+        self.memory.clear()
 
-    def get_action(self, state):
-        """
-        Compute the action to take in the current state, including exploration.
-        With probability self.epsilon, we should take a random action.
-            otherwise - the best policy action (self.get_best_action).
+    def make_move(self, game_state: dict) -> Card:
+        self.reward = 0
+        pred = self.get_action(game_state)
+        card = self.decode_number_to_card_from_hand(pred, game_state)
+        if self.is_legal_move(card, game_state):
+            print('Yay, legal action')
+            self.action = self.decode(card)
+            return card
 
-        Note: To pick randomly from a list, use random.choice(list).
-              To pick True or False with a given probablity, generate uniform number in [0, 1]
-              and compare it with your probability
-        """
-        possible_actions = self.get_legal_actions(state)       
+        self.punish(pred)
+        card = self.get_any_legal_move(game_state)
+        self.action = self.decode(card)
+        return card
 
-        return random.choice(possible_actions) if (np.random.random() <= self.epsilon) else self.get_best_action(state)
+    def is_legal_move(self, card, game_state):
+        if card is None:
+            return False
 
-    def get_best_action(self, state):
-        """
-        Compute the best action to take in a state.
-        """
-        return np.argmax(self.model.predict(state)[0])
-    
-    def get_legal_actions(self, state):
-        return state['hand']
+        if not game_state["discard"]:
+            return True
+        else:
+            options = list(
+                filter(lambda c: c.suit == list(game_state["discard"])[0].suit, game_state["hand"]))
+            if len(options) > 0:
+                return card in options
+            else:
+                return True
+
+    def punish(self, pred):
+        print('Illegal action')
+        self.memory.add_to_memory(self.observation, pred, -500)
+
+    def get_any_legal_move(self, game_state):
+        if not game_state["discard"]:
+            return random.choice(game_state["hand"])
+        else:
+            options = list(
+                filter(lambda c: c.suit == list(game_state["discard"])[0].suit, game_state["hand"]))
+            if len(options) > 0:
+                return random.choice(options)
+            else:
+                return random.choice(game_state['hand'])
+
+    def get_action(self, game_state):
+        self.observation = self.get_input_vector(game_state)
+        self.observation = np.expand_dims(self.observation, axis=0)
+        logits = self.model.predict(self.observation, verbose=0)
+        action = tf.random.categorical(logits, num_samples=1)
+        action = action.numpy().flatten()
+        return action[0]
 
     def create_model(self):
-        learning_rate = 0.001
+        # learning_rate = 0.01
         action_size = 24
-        state_size = 10 # [1, 2, 3, 4, 5, 0,| 5, 6, 7, 8 ]
+        state_size = 9  # [1, 2, 3, 4, 5, 0,| 5, 6, 7 ]
 
         model = keras.Sequential()
-        model.add(keras.layers.Dense(64, input_dim=state_size, activation='relu'))
+        model.add(keras.layers.Dense(
+            64, input_dim=state_size, activation='relu'))
         model.add(keras.layers.Dense(64, activation="relu"))
         model.add(keras.layers.Dense(action_size, activation="softmax"))
-        model.compile(loss="mse",
-              optimizer=keras.optimizers.Adam(learning_rate=learning_rate))
-        # na wyjsciu sieci chcemy miec pojedyncza liczbe z zakresu 1-24 wskazujaca karte z naszej mapy
-        # te liczbe otrzymana od sieci podajemy do funkcji decode_number_to_card_from_hand() zeby dostac karte do zagrania
+        model.compile()
+        return model
 
-    def decode_number_to_card_from_hand(self, prediction, hand):
+    def decode_number_to_card_from_hand(self, prediction, game_state):
         rank = None
         suit = None
         for r in self.card_map.keys():
             for s in self.card_map[r]:
-                if self.card_map[r][s] is prediction:
+                if self.card_map[r][s] == prediction:
                     rank = r
                     suit = s
                     break
-        for card in hand:
+        for card in game_state['hand']:
             if card.rank is rank and card.suit is suit:
-                return card # siec chce zagrac te karte
-        return random.choice(hand)  # tu by sie przydalo ukarac siec bo chciala zagrac karte ktorej nie mamy w rece
+                return card
+        return None
 
-    # returns vector of 6 elements with mapped card -> number
-    # if there is less than 6 cards on hand it will be filled to 6 with zeros
     def get_input_vector(self, game_state):
         vect = []
         for card in game_state['hand']:
@@ -130,14 +175,14 @@ class GambitPlayer(Player):
             vect.append(0)
         for discard in game_state['discard']:
             vect.append(self.decode(discard))
-        for i in range(10 - len(vect)):
+        for i in range(9 - len(vect)):
             vect.append(0)
         return np.array(vect)
 
     def get_card_map(self):
         ranks = ['9', '10', 'Jack', 'Queen', 'King', 'Ace']
         suits = ['Clovers', 'Diamonds', 'Hearts', 'Spades']
-        counter = 1
+        counter = 0
         map = {}
         for i in range(6):
             map[ranks[i]] = {}
