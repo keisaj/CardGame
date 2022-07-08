@@ -4,7 +4,7 @@ import tensorflow as tf
 from tensorflow import keras
 
 from card_game import CardGame, Player, Card
-from keras.optimizers import Adam
+from keras.optimizers import Adam, SGD
 
 player = 1
 
@@ -63,10 +63,10 @@ class GambitPlayer(Player):
         self.number = player
         player += 1
         self.epsilon = 1.0
+        self.optimizer = Adam()
         self.model = self.create_model()
         self.card_map = self.get_card_map()
         self.memory = Memory()
-        self.optimizer = Adam()
         self.reward = 0
         self.action = 0
         self.observation = 0
@@ -77,7 +77,7 @@ class GambitPlayer(Player):
     def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):
         for point in point_deltas:
             if type(point) == type(GambitPlayer()):
-                self.reward = -point_deltas[point]
+                self.reward += -point_deltas[point]
                 self.memory.add_to_memory(self.observation, self.action, self.reward)
 
     def set_final_reward(self, points: dict):
@@ -89,14 +89,18 @@ class GambitPlayer(Player):
         self.memory.clear()
 
     def make_move(self, game_state: dict) -> Card:
+        self.reward = 0
         pred = self.get_action(game_state)
         card = self.decode_number_to_card_from_hand(pred, game_state)
         if self.is_legal_move(card, game_state):
-            print('Yay! Legal Move')
+            print('Yay, legal action')
+            self.action = self.decode(card)
             return card
 
-        self.punish()
-        return self.get_any_legal_move(game_state)
+        self.punish(pred)
+        card = self.get_any_legal_move(game_state)
+        self.action = self.decode(card)
+        return card
 
     def is_legal_move(self, card, game_state):
         if card is None:
@@ -112,8 +116,9 @@ class GambitPlayer(Player):
             else:
                 return True
 
-    def punish(self):
-        print('Illegal Move')
+    def punish(self, pred):
+        print('Illegal action')
+        self.memory.add_to_memory(self.observation, pred, -500)
 
     def get_any_legal_move(self, game_state):
         if not game_state["discard"]:
@@ -135,16 +140,15 @@ class GambitPlayer(Player):
         return action[0]
 
     def create_model(self):
-        learning_rate = 0.01
+        # learning_rate = 0.01
         action_size = 24
         state_size = 9  # [1, 2, 3, 4, 5, 0,| 5, 6, 7 ]
 
         model = keras.Sequential()
         model.add(keras.layers.Dense(64, input_dim=state_size, activation='relu'))
         model.add(keras.layers.Dense(64, activation="relu"))
-        model.add(keras.layers.Dense(action_size, activation="linear"))
-        model.compile(loss="mse",
-                      optimizer=keras.optimizers.Adam(learning_rate=learning_rate))
+        model.add(keras.layers.Dense(action_size, activation="softmax"))
+        model.compile()
         return model
 
     def decode_number_to_card_from_hand(self, prediction, game_state):
